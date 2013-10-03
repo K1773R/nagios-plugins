@@ -1,0 +1,93 @@
+#!/usr/bin/env python
+#
+# Check P2Pool Miner Stats
+#
+# This script connects to the p2pool server's HTTP interface and parses the
+# /local_stats path for determining the average hash rate of a miner.
+#
+# Authors:
+# Darryl Ross <darryl@afoyi.com>
+# K1773R <K1773R@darkgamex.ch>
+#
+# License: GNU GPL v3
+#
+# Usage:
+# check_p2pool_miner
+#   - Provide the hash rate for the entire server. Returns a Nagios 'OK' status.
+#
+# check_p2pool_miner <-a/-all>
+#   - Provide a list of miners on the server and their current effective rate.
+#
+# check_p2pool_miner <-u/--user> <username>
+#   - Provide the hash rate of a single miner. Returns a Nagios 'OK' status.
+#
+# check_p2pool_miner <-u/--user> <username> <-w/--warning> <warning> <-c/--critical> <critical>
+#   - Provide the hash rate of a single miner. Returns a Nagios status
+#     depending on the detected effective hash rate. <warning> and <critical> are
+#     in MH/s.
+
+import json, sys
+from urllib import urlopen
+from optparse import OptionParser
+
+parser = OptionParser()
+parser.add_option("-a", "--all", action="store_true", dest="all", help="lists all miners including their hashrate.")
+parser.add_option("-u", "--user", action="store", type="string", dest="username", default="", help="username of miner to check.")
+parser.add_option("-w", "--warning", action="store", type="float", dest="warning", default=-1, help="warning if hashrate in MHs is lower than X.")
+parser.add_option("-c", "--critical", action="store", type="float", dest="critical", default=-1, help="critical if hashrate in MHs is lower than X.")
+parser.add_option("-H", "--host", action="store", type="string", dest="host", default="127.0.0.1", help="host/ip of p2pool to check.")
+parser.add_option("-P", "--port", action="store", type="string", dest="port", default="9332", help="port of p2pool to check.")
+
+(options, args) = parser.parse_args()
+url_stats = 'http://' + options.host + ':' + options.port + '/local_stats'
+
+def parse_stats():
+    conn = urlopen(url_stats)
+    if conn.code != 200:
+        print 'Error occured reading data (received code %d) ...' % conn.code
+        sys.exit(1)
+    json_dict = json.loads(conn.read())
+    data = json_dict['miner_hash_rates']
+    for key in json_dict['miner_dead_hash_rates'].keys():
+        if not data.has_key(key):
+            data[key] = 0.00
+        data[key] -= json_dict['miner_dead_hash_rates'][key]
+    return data
+
+def print_string(alert_type, miner_name, miner_rate):
+    print 'MINER %s: %s effective 1 hour average is %3.2f MH/s' % (alert_type, miner_name, miner_rate/1000000)
+
+
+# ---------------------------------------------------------------------------
+MINERS = parse_stats()
+
+# miner username provided
+if options.username != "":
+    miner = options.username
+    if not miner in MINERS.keys():
+        print 'MINER CRITICAL: Miner %s has not mined in the last hour' % miner
+        sys.exit(2)
+    if options.warning == -1 and options.critical == -1:
+        print_string('OK', miner, MINERS[miner])
+        sys.exit(0)
+    elif MINERS[miner] <= options.critical*1000000:
+        print_string('CRITICAL', miner, MINERS[miner])
+        sys.exit(2)
+    elif MINERS[miner] <= options.warning*1000000:
+        print_string('WARNING', miner, MINERS[miner])
+        sys.exit(1)
+    else:
+        print_string('OK', miner, MINERS[miner])
+        sys.exit(0)
+
+# list all users
+elif options.all == True:
+        for miner in sorted(MINERS.keys()):
+            print_string('STAT ONLY', miner, MINERS[miner])
+        sys.exit(0)
+        
+# no username given, total node hashrate, no limits
+elif options.all != True:
+    total = sum(MINERS.values())
+    print_string('OK', 'Complete network', total)
+    sys.exit(0)
