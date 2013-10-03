@@ -85,7 +85,7 @@ elif options.all == True:
         for miner in sorted(MINERS.keys()):
             print_string('STAT ONLY', miner, MINERS[miner])
         sys.exit(0)
-        
+
 # no username given, total node hashrate, no limits
 elif options.all != True:
     total = sum(MINERS.values())
